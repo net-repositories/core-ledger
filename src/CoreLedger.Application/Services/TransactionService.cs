@@ -1,4 +1,5 @@
-﻿using CoreLedger.Application.DTOs;
+﻿using CoreLedger.Application.Abstractions;
+using CoreLedger.Application.DTOs;
 using CoreLedger.Application.Events;
 using CoreLedger.Domain.Entities;
 using CoreLedger.Domain.Enums;
@@ -12,7 +13,9 @@ public class TransactionService(
     IAccountRepository accountRepository,
     ITransactionRepository transactionRepository,
     IUnitOfWork unitOfWork,
-    IPublishEndpoint publishEndpoint)
+    IPublishEndpoint publishEndpoint,
+    ICacheService cacheService,
+    ICurrentUserService currentUserService)
 {
     public async Task<TransactionResponse> DepositAsync(DepositRequest request, CancellationToken ct = default)
     {
@@ -38,7 +41,6 @@ public class TransactionService(
 
             await transactionRepository.AddAsync(transaction, ct);
 
-            // Запись события в Outbox в рамках текущей транзакции БД
             await publishEndpoint.Publish(new TransactionCompletedEvent(
                 transaction.Id,
                 transaction.FromAccountId,
@@ -51,6 +53,9 @@ public class TransactionService(
             await unitOfWork.SaveChangesAsync(ct);
             await dbTx.CommitAsync(ct);
 
+            // Инвалидация кэша строго ПОСЛЕ коммита в БД
+            await cacheService.RemoveAsync(AccountService.GetCacheKey(account.Id), ct);
+
             return MapToResponse(transaction);
         }
         catch (DuplicateIdempotencyKeyException)
@@ -61,6 +66,8 @@ public class TransactionService(
 
     public async Task<TransactionResponse> WithdrawAsync(WithdrawRequest request, CancellationToken ct = default)
     {
+        var currentUserId = currentUserService.GetRequiredUserId();
+
         var existing = await GetCompletedTransactionAsync(request.IdempotencyKey, ct);
         if (existing is not null) return existing;
 
@@ -70,6 +77,10 @@ public class TransactionService(
 
             var account = await accountRepository.GetByIdForUpdateAsync(request.AccountId, ct)
                 ?? throw new NotFoundException($"Account '{request.AccountId}' not found.");
+
+            // Проверка владельца счета (Ownership)
+            if (account.UserId != currentUserId)
+                throw new ForbiddenException("You are not allowed to withdraw funds from another user's account.");
 
             var transaction = new Transaction(
                 request.IdempotencyKey,
@@ -95,6 +106,8 @@ public class TransactionService(
             await unitOfWork.SaveChangesAsync(ct);
             await dbTx.CommitAsync(ct);
 
+            await cacheService.RemoveAsync(AccountService.GetCacheKey(account.Id), ct);
+
             return MapToResponse(transaction);
         }
         catch (DuplicateIdempotencyKeyException)
@@ -105,6 +118,8 @@ public class TransactionService(
 
     public async Task<TransactionResponse> TransferAsync(TransferRequest request, CancellationToken ct = default)
     {
+        var currentUserId = currentUserService.GetRequiredUserId();
+
         if (request.FromAccountId == request.ToAccountId)
             throw new DomainException("Cannot transfer funds to the same account.");
 
@@ -120,6 +135,10 @@ public class TransactionService(
 
             var fromAccount = lockedAccounts.FirstOrDefault(a => a.Id == request.FromAccountId)
                 ?? throw new NotFoundException($"Source account '{request.FromAccountId}' not found.");
+
+            // Проверка владельца счета списания (Ownership)
+            if (fromAccount.UserId != currentUserId)
+                throw new ForbiddenException("You are not allowed to transfer funds from another user's account.");
 
             var toAccount = lockedAccounts.FirstOrDefault(a => a.Id == request.ToAccountId)
                 ?? throw new NotFoundException($"Destination account '{request.ToAccountId}' not found.");
@@ -152,6 +171,10 @@ public class TransactionService(
 
             await unitOfWork.SaveChangesAsync(ct);
             await dbTx.CommitAsync(ct);
+
+            // Инвалидируем оба затронутых счета
+            await cacheService.RemoveAsync(AccountService.GetCacheKey(fromAccount.Id), ct);
+            await cacheService.RemoveAsync(AccountService.GetCacheKey(toAccount.Id), ct);
 
             return MapToResponse(transaction);
         }

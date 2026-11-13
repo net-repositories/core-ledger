@@ -13,6 +13,7 @@ public sealed class GlobalExceptionHandler(IProblemDetailsService problemDetails
     {
         var (statusCode, title) = exception switch
         {
+            ForbiddenException => (StatusCodes.Status403Forbidden, "Forbidden"),
             InsufficientFundsException => (StatusCodes.Status422UnprocessableEntity, "Insufficient Funds"),
             NotFoundException => (StatusCodes.Status404NotFound, "Resource Not Found"),
             DomainException => (StatusCodes.Status400BadRequest, "Business Rule Violation"),

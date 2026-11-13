@@ -10,6 +10,9 @@ public class UserRepository(AppDbContext dbContext) : IUserRepository
     public Task<User?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         dbContext.Users.FirstOrDefaultAsync(x => x.Id == id, ct);
 
+    public Task<User?> GetByEmailAsync(string email, CancellationToken ct = default) =>
+        dbContext.Users.FirstOrDefaultAsync(x => x.Email == email.Trim().ToLowerInvariant(), ct);
+
     public Task<bool> ExistsByEmailAsync(string email, CancellationToken ct = default) =>
         dbContext.Users.AnyAsync(x => x.Email == email.Trim().ToLowerInvariant(), ct);
 
