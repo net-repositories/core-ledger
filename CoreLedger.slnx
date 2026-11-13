@@ -8,4 +8,7 @@
     <Project Path="src/CoreLedger.Domain/CoreLedger.Domain.csproj" />
     <Project Path="src/CoreLedger.Infrastructure/CoreLedger.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CoreLedger.IntegrationTests/CoreLedger.IntegrationTests.csproj" />
+  </Folder>
 </Solution>

@@ -69,7 +69,9 @@ builder.Services
     });
 builder.Services.AddAuthorization();
 
-// 4. Rate Limiting (не более 10 транзакций в минуту на пользователя или IP)
+// 4. Rate Limiting (читаем лимит из конфигурации, по умолчанию 10)
+var permitLimit = builder.Configuration.GetValue<int?>("RateLimiting:PermitLimit") ?? 10;
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -83,7 +85,7 @@ builder.Services.AddRateLimiter(options =>
 
         return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 10,
+            PermitLimit = permitLimit, // <-- Используем переменную здесь
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0
         });
@@ -114,7 +116,8 @@ builder.Services.AddMassTransit(x =>
     x.UsingRabbitMq((context, cfg) =>
     {
         var rabbitSection = builder.Configuration.GetSection("RabbitMQ");
-        cfg.Host(rabbitSection["Host"] ?? "localhost", rabbitSection["VirtualHost"] ?? "/", h =>
+        var rabbitPort = rabbitSection.GetValue<ushort?>("Port") ?? 5672;
+        cfg.Host(rabbitSection["Host"] ?? "localhost", rabbitPort, rabbitSection["VirtualHost"] ?? "/", h =>
         {
             h.Username(rabbitSection["Username"] ?? "guest");
             h.Password(rabbitSection["Password"] ?? "guest");
@@ -222,3 +225,5 @@ app.Run();
 
 public record LoginRequest(string Email);
 public record LoginResponse(string Token, Guid UserId, string Email);
+
+public partial class Program { }
