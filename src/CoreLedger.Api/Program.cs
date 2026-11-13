@@ -9,30 +9,35 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Поддержка строковых Enum в JSON (RUB, USD, EUR)
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
-// Регистрация БД и репозиториев
+// ProblemDetails + IExceptionHandler (RFC 7807)
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+// БД и репозитории
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<AppDbContext>());
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IAccountRepository, AccountRepository>();
+builder.Services.AddScoped<ITransactionRepository, TransactionRepository>();
 
-// Регистрация сервисов Application
+// Сервисы Application
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<TransactionService>();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
@@ -40,7 +45,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Эндпоинты
+// Пользователи и счета
 app.MapPost("/api/users", async (CreateUserRequest request, UserService userService, CancellationToken ct) =>
 {
     var result = await userService.CreateUserAsync(request, ct);
@@ -57,6 +62,25 @@ app.MapGet("/api/accounts/{id:guid}", async (Guid id, AccountService accountServ
 {
     var result = await accountService.GetAccountByIdAsync(id, ct);
     return result is not null ? Results.Ok(result) : Results.NotFound();
+});
+
+// Финансовые транзакции
+app.MapPost("/api/transactions/deposit", async (DepositRequest request, TransactionService txService, CancellationToken ct) =>
+{
+    var result = await txService.DepositAsync(request, ct);
+    return Results.Ok(result);
+});
+
+app.MapPost("/api/transactions/withdraw", async (WithdrawRequest request, TransactionService txService, CancellationToken ct) =>
+{
+    var result = await txService.WithdrawAsync(request, ct);
+    return Results.Ok(result);
+});
+
+app.MapPost("/api/transactions/transfer", async (TransferRequest request, TransactionService txService, CancellationToken ct) =>
+{
+    var result = await txService.TransferAsync(request, ct);
+    return Results.Ok(result);
 });
 
 app.Run();

@@ -29,4 +29,12 @@ public class Transaction
         Status = TransactionStatus.Pending;
         CreatedAt = DateTime.UtcNow;
     }
+
+    public void MarkAsCompleted()
+    {
+        if (Status != TransactionStatus.Pending)
+            throw new DomainException($"Cannot complete transaction in status '{Status}'.");
+
+        Status = TransactionStatus.Completed;
+    }
 }
