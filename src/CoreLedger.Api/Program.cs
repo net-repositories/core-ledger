@@ -6,6 +6,8 @@ using CoreLedger.Domain.Repositories;
 using CoreLedger.Infrastructure.Persistence;
 using CoreLedger.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
+using CoreLedger.Application.Consumers;
+using MassTransit;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,6 +33,41 @@ builder.Services.AddScoped<ITransactionRepository, TransactionRepository>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<TransactionService>();
+
+builder.Services.AddMassTransit(x =>
+{
+    x.AddConsumer<TransactionCompletedConsumer>();
+
+    x.AddEntityFrameworkOutbox<AppDbContext>(o =>
+    {
+        o.UsePostgres();
+        o.UseBusOutbox();
+    });
+
+    // Подключаем Outbox/Inbox ко всем эндпоинтам консьюмеров
+    x.AddConfigureEndpointsCallback((context, name, cfg) =>
+    {
+        cfg.UseEntityFrameworkOutbox<AppDbContext>(context);
+    });
+
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        var rabbitSection = builder.Configuration.GetSection("RabbitMQ");
+        cfg.Host(rabbitSection["Host"] ?? "localhost", rabbitSection["VirtualHost"] ?? "/", h =>
+        {
+            h.Username(rabbitSection["Username"] ?? "guest");
+            h.Password(rabbitSection["Password"] ?? "guest");
+        });
+
+        cfg.UseMessageRetry(r => r.Exponential(
+            retryLimit: 3,
+            minInterval: TimeSpan.FromSeconds(1),
+            maxInterval: TimeSpan.FromSeconds(10),
+            intervalDelta: TimeSpan.FromSeconds(2)));
+
+        cfg.ConfigureEndpoints(context);
+    });
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

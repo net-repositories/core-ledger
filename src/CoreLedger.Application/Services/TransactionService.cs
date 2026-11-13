@@ -1,15 +1,18 @@
 ﻿using CoreLedger.Application.DTOs;
+using CoreLedger.Application.Events;
 using CoreLedger.Domain.Entities;
 using CoreLedger.Domain.Enums;
 using CoreLedger.Domain.Exceptions;
 using CoreLedger.Domain.Repositories;
+using MassTransit;
 
 namespace CoreLedger.Application.Services;
 
 public class TransactionService(
     IAccountRepository accountRepository,
     ITransactionRepository transactionRepository,
-    IUnitOfWork unitOfWork)
+    IUnitOfWork unitOfWork,
+    IPublishEndpoint publishEndpoint)
 {
     public async Task<TransactionResponse> DepositAsync(DepositRequest request, CancellationToken ct = default)
     {
@@ -34,6 +37,17 @@ public class TransactionService(
             transaction.MarkAsCompleted();
 
             await transactionRepository.AddAsync(transaction, ct);
+
+            // Запись события в Outbox в рамках текущей транзакции БД
+            await publishEndpoint.Publish(new TransactionCompletedEvent(
+                transaction.Id,
+                transaction.FromAccountId,
+                transaction.ToAccountId,
+                transaction.Amount,
+                account.Currency,
+                transaction.Type,
+                transaction.CreatedAt), ct);
+
             await unitOfWork.SaveChangesAsync(ct);
             await dbTx.CommitAsync(ct);
 
@@ -68,6 +82,16 @@ public class TransactionService(
             transaction.MarkAsCompleted();
 
             await transactionRepository.AddAsync(transaction, ct);
+
+            await publishEndpoint.Publish(new TransactionCompletedEvent(
+                transaction.Id,
+                transaction.FromAccountId,
+                transaction.ToAccountId,
+                transaction.Amount,
+                account.Currency,
+                transaction.Type,
+                transaction.CreatedAt), ct);
+
             await unitOfWork.SaveChangesAsync(ct);
             await dbTx.CommitAsync(ct);
 
@@ -91,7 +115,6 @@ public class TransactionService(
         {
             await using var dbTx = await unitOfWork.BeginTransactionAsync(ct);
 
-            // Блокируем оба счета в детерминированном порядке (по возрастанию Guid) для исключения Deadlock
             var lockedAccounts = await accountRepository.GetByIdsForUpdateOrderedAsync(
                 [request.FromAccountId, request.ToAccountId], ct);
 
@@ -117,6 +140,16 @@ public class TransactionService(
             transaction.MarkAsCompleted();
 
             await transactionRepository.AddAsync(transaction, ct);
+
+            await publishEndpoint.Publish(new TransactionCompletedEvent(
+                transaction.Id,
+                transaction.FromAccountId,
+                transaction.ToAccountId,
+                transaction.Amount,
+                fromAccount.Currency,
+                transaction.Type,
+                transaction.CreatedAt), ct);
+
             await unitOfWork.SaveChangesAsync(ct);
             await dbTx.CommitAsync(ct);
 

@@ -4,6 +4,10 @@
     <ProjectReference Include="..\CoreLedger.Domain\CoreLedger.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="MassTransit.Abstractions" Version="9.2.6" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
